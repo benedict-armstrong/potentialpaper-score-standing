@@ -4,9 +4,10 @@ A [PotentialPaper](https://github.com/PotentialHedge/potentialpaper) plugin: whe
 among the submissions at its venue, and a venue's whole distribution. The "where you stand" figure from acceptodds,
 for review scores.
 
-- **On a paper** (side column): the paper's mean over its reviews, marked on the venue's histogram and on a curve,
-  with the share of submissions below it shaded and its band ("Top 12%"). A paper that went to several venues
-  (rejected at one, accepted at the next) gets a tab per venue.
+- **On a paper** (in the Submissions section, under each submission that has scores): the paper's mean over its
+  reviews, marked on that venue's histogram and on a curve, with the share of submissions below it shaded and its
+  band ("Top 12%"). A paper that went to several venues (rejected at one, accepted at the next) gets a figure under
+  each.
 - **On a venue** (main column): the whole distribution, split by decision once decisions are out, which shows the
   accept rate at each score. A series gets a tab per edition.
 - **On an organisation** (main column): each venue its papers went to, drawn whole from the venue's own page, with

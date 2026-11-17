@@ -93,7 +93,7 @@ function fakePp(context: Partial<PP.Context>, answers: {
   };
   const ctx = {
     plugin: { id: 'benedict-armstrong/score-standing', name: 'Score standing', version: '0.1.0', sha: null, dev: true },
-    surface: { type: 'panel', panel: 'standing', slot: 'paper.aside' },
+    surface: { type: 'panel', panel: 'standing', slot: 'venue.main' },
     page: null,
     scopes: [],
     viewer: { signedIn: true, isOwner: false },
@@ -241,6 +241,32 @@ describe('on a paper', () => {
     // The other venue: its own figure, with its own mean.
     (tabs[0] as HTMLButtonElement).click();
     await vi.waitFor(() => expect(document.querySelector('.caption')?.textContent).toMatch(/^3 mean over 1 review,/));
+  });
+
+  it('under one submission, draws that venue alone, without tabs', async () => {
+    const under = (venue: { id: string; name: string }) =>
+      ({ type: 'panel', panel: 'standing', slot: 'paper.submission', submission: { venue } }) as PP.Context['surface'];
+    fakePp(
+      { page: page('paper', 'arxiv:2701.00001'), scopes: [NEURIPS_PAGE, ICLR_PAGE], surface: under(NEURIPS) },
+      { lists, submissions },
+    );
+    await boot();
+    expect(document.querySelectorAll('[role=tab]').length).toBe(0);
+    expect(document.querySelector('.caption')!.textContent).toMatch(/^3 mean over 1 review,/);
+    expect(document.querySelector('svg[role=img]')!.getAttribute('aria-label')).toContain('at NeurIPS 2026');
+  });
+
+  it('under a submission whose venue has no statistics, says so by name', async () => {
+    fakePp(
+      {
+        page: page('paper', 'arxiv:2701.00001'),
+        scopes: [ICLR_PAGE],
+        surface: { type: 'panel', panel: 'standing', slot: 'paper.submission', submission: { venue: { id: 'openreview:TMLR', name: 'TMLR' } } },
+      },
+      { lists, submissions },
+    );
+    await boot();
+    expect(document.querySelector('.note')!.textContent).toBe('No score statistics for TMLR yet.');
   });
 
   it('switches the field and keeps it as the setting; a field fetched once is not fetched again', async () => {

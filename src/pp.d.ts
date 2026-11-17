@@ -40,7 +40,15 @@ declare namespace PP {
   interface Context {
     plugin: { id: string; name: string; version: string; sha: string | null; dev: boolean };
     /** The panel this frame draws, or the plugin page it is. */
-    surface: { type: 'panel'; panel: string; slot: string } | { type: 'page'; page: string; path: string[] };
+    surface:
+    | {
+        type: 'panel';
+        panel: string;
+        slot: string;
+        /** In the `paper.submission` slot: the submission it is drawn under, by its venue (`openreview:ICLR.cc/2027/Conference`). */
+        submission?: { venue: { id: string; name: string } };
+      }
+    | { type: 'page'; page: string; path: string[] };
     /** The page the panel is on; `null` on the plugin's own page. */
     page: PageSummary | null;
     /** The pages above it: a paper's venues, topics and orgs; a topic's broader topics; an org's parents. */

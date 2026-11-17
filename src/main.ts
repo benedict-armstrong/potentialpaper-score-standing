@@ -2,7 +2,7 @@
 /**
  * Score standing, a PotentialPaper plugin. One figure, shown differently on each kind of page:
  *
- * - on a paper (the side column): the paper's standing at its venue, a tab per venue it went to;
+ * - on a paper (under each of its submissions, `paper.submission`): the paper's standing at that submission's venue;
  * - on a venue (the main column): the whole distribution, split by decision once decisions are out, a tab per
  *   venue on a series;
  * - on an organisation: each venue's whole distribution (from the venue's own page), with the organisation's
@@ -80,10 +80,13 @@ async function loadTabs(ctx: PP.Context): Promise<VenueTab[]> {
       pp.reviews.forPaper(),
       Promise.all(venues.map((v) => pp.scope.scores(v.identifier).catch(() => null))),
     ]);
-    return paperTabs(
+    const all = paperTabs(
       submissions,
       lists.filter((l): l is PP.ScoreList => l !== null),
     );
+    // Under one submission (`paper.submission`): that venue's figure only. In another slot, a tab per venue.
+    const under = ctx.surface.type === 'panel' ? ctx.surface.submission : undefined;
+    return under ? all.filter((t) => t.venue.id === under.venue.id) : all;
   }
   if (ctx.page.kind === 'org') return orgTabs(await pp.scope.scores());
   return scopeTabs(await pp.scope.scores());
@@ -116,7 +119,10 @@ async function distributionSummary(tab: VenueTab, summary: PP.ScoreSummary): Pro
 async function show() {
   const token = ++loadToken;
   const tab = tabs[tabIndex];
-  if (!tab) return message('No score statistics here yet.');
+  if (!tab) {
+    const under = pp.context?.surface.type === 'panel' ? pp.context.surface.submission : undefined;
+    return message(under ? `No score statistics for ${under.venue.name} yet.` : 'No score statistics here yet.');
+  }
   const summary = chooseField(tab.fields, pickedField ?? settings.field);
   if (!summary) return message(`No score statistics for ${tab.venue.name} yet.`);
   current = { tab, summary, field: null };
@@ -302,7 +308,7 @@ pp.ready.then((ctx) => {
     pickedField = null;
     void load(pp.context!);
   });
-  // Redraw at the frame's new width (a phone turned, the side column opened).
+  // Redraw at the frame's new width (a phone turned, a window resized).
   let lastWidth = app.clientWidth;
   new ResizeObserver(() => {
     if (Math.abs(app.clientWidth - lastWidth) < 4) return;
