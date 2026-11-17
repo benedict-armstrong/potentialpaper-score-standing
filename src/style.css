@@ -1,0 +1,222 @@
+/* The page's tokens arrive as --pp-<name> on :root (pp.d.ts, Theme), so the figures follow the site in light and dark. */
+:root {
+  --ink: var(--pp-ink, #1d1d1d);
+  --muted: var(--pp-muted, #6b6b6b);
+  --faint: var(--pp-faint, #9a9a9a);
+  --rule: var(--pp-rule, #d8d8d8);
+  --rule-soft: var(--pp-rule-soft, #ececec);
+  --card: var(--pp-card, #fff);
+  --accent: var(--pp-accent, #b31b1b);
+  --up: var(--pp-up, #1a7f37);
+}
+body {
+  margin: 0;
+  background: transparent;
+  color: var(--ink);
+  font: 13px/1.45 var(--pp-font-sans, system-ui, sans-serif);
+}
+#app {
+  position: relative;
+}
+p {
+  margin: 0 0 6px;
+}
+.note,
+.muted {
+  color: var(--muted);
+}
+.mono,
+.tick {
+  font-family: var(--pp-font-mono, ui-monospace, monospace);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Tabs per venue and the field switcher. */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 6px;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.tab {
+  font: inherit;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.tab[aria-selected='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+.tab:focus-visible,
+select:focus-visible,
+svg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.field {
+  color: var(--muted);
+}
+select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  padding: 1px 4px;
+  max-width: 100%;
+}
+.caption strong {
+  font-family: var(--pp-font-mono, ui-monospace, monospace);
+}
+
+/* The figures. */
+.figure {
+  position: relative;
+  margin: 2px 0 8px;
+  user-select: none;
+}
+.figure svg {
+  display: block;
+  overflow: visible;
+  max-width: 100%;
+}
+.tip {
+  position: absolute;
+  top: 2px;
+  z-index: 1;
+  padding: 3px 7px;
+  border: 1px solid var(--rule);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+.tick {
+  fill: var(--muted);
+  font-size: 10.5px;
+}
+.axis {
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+rect.bar {
+  fill: var(--rule);
+}
+rect.under {
+  fill: var(--accent);
+  fill-opacity: 0.28;
+}
+rect.mine {
+  fill: var(--accent);
+}
+.mine-outline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.mine-tick {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.below {
+  fill: var(--accent);
+  fill-opacity: 0.1;
+}
+rect.hover {
+  fill: var(--ink);
+  fill-opacity: 0.06;
+}
+line.hover {
+  stroke: var(--faint);
+  stroke-width: 1;
+}
+.area {
+  fill: var(--rule-soft);
+}
+.line {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+}
+.you {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.you-dot {
+  fill: var(--accent);
+  stroke: var(--card);
+  stroke-width: 2;
+}
+.marker-label {
+  fill: var(--ink);
+  stroke: var(--card);
+  stroke-width: 4px;
+  paint-order: stroke;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Outcomes: accepted in the site's "up" colour, rejected in its muted ink, the undecided paler. */
+.o-accepted {
+  fill: var(--up);
+  background: var(--up);
+  fill-opacity: 0.7;
+}
+.o-rejected {
+  fill: var(--muted);
+  background: var(--muted);
+  fill-opacity: 0.45;
+}
+.o-withdrawn {
+  fill: var(--faint);
+  background: var(--faint);
+  fill-opacity: 0.35;
+}
+.o-pending {
+  fill: var(--rule);
+  background: var(--rule);
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+.swatch.o-accepted {
+  opacity: 0.7;
+}
+.swatch.o-rejected {
+  opacity: 0.45;
+}
+.swatch.o-withdrawn {
+  opacity: 0.35;
+}

@@ -1,0 +1,44 @@
+{
+  "id": "benedict-armstrong/score-standing",
+  "name": "Score standing",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "Where a paper's review scores stand among the submissions at its venue, and a venue's whole distribution: a histogram and a curve, split by decision once decisions are out.",
+  "author": "Benedict Armstrong",
+  "homepage": "https://github.com/benedict-armstrong/potentialpaper-score-standing",
+  "main": "dist/index.html",
+  "permissions": ["reviews.read", "scope.read"],
+  "contributes": {
+    "panels": [
+      {
+        "id": "standing",
+        "title": "Score standing",
+        "kinds": ["paper", "venue", "org"],
+        "slot": { "paper": "aside", "*": "main" },
+        "when": "page.hasScores"
+      }
+    ],
+    "settings": {
+      "view": {
+        "type": "enum",
+        "default": "both",
+        "values": ["both", "histogram", "curve"],
+        "labels": ["Histogram and curve", "Histogram only", "Curve only"],
+        "description": "Which figures to show."
+      },
+      "field": {
+        "type": "string",
+        "default": "",
+        "maxLength": 100,
+        "description": "The score field to show, by its key in the venue's review form (rating, soundness, …). Empty means the venue's first, usually the overall rating."
+      },
+      "splitByDecision": {
+        "type": "enum",
+        "default": "auto",
+        "values": ["auto", "on", "off"],
+        "labels": ["Once decisions are out", "Always", "Never"],
+        "description": "Whether to split the figures by outcome (accepted, rejected, …)."
+      }
+    }
+  }
+}

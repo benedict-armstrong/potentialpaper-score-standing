@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build
+        run: npm run build
+      # PotentialPaper serves dist/ as committed and never builds, so a stale dist/ is a broken release.
+      - name: dist/ is up to date
+        run: |
+          if [ -n "$(git status --porcelain -- dist)" ]; then
+            echo "::error::dist/ is stale: run npm run build and commit dist/."
+            git status --porcelain -- dist
+            git diff --stat -- dist
+            exit 1
+          fi

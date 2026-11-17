@@ -1,0 +1,233 @@
+/// <reference path="./pp.d.ts" />
+/**
+ * Score standing, a PotentialPaper plugin. One figure, shown differently on each kind of page:
+ *
+ * - on a paper (the side column): the paper's standing at its venue, a tab per venue it went to;
+ * - on a venue (the main column): the whole distribution, split by decision once decisions are out, a tab per
+ *   venue on a series;
+ * - on an organisation: its papers' distribution per venue, as on a venue, until org pages have members (see README).
+ *
+ * Data comes from the site's score statistics only (`pp.scope.scores`), plus the paper's own reviews for its mean.
+ */
+import './style.css';
+import { cached, defaultStore } from './cache';
+import { curve, histogram } from './render';
+import {
+  chooseField,
+  count,
+  firstTab,
+  markerLabel,
+  OUTCOME_LABELS,
+  outcomeCounts,
+  paperMean,
+  paperTabs,
+  readSettings,
+  scopeTabs,
+  scoreText,
+  shareText,
+  splitOn,
+  standingOf,
+  summaryText,
+  type Settings,
+  type VenueTab,
+} from './standing';
+
+const app = document.getElementById('app')!;
+const store = defaultStore<PP.ScoreField>();
+
+let settings: Settings = readSettings(null);
+let tabs: VenueTab[] = [];
+let tabIndex = 0;
+/** The field picked in this frame, ahead of the setting's round trip. */
+let pickedField: string | null = null;
+let current: { tab: VenueTab; summary: PP.ScoreSummary; field: PP.ScoreField | null } | null = null;
+let loadToken = 0;
+
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  props: Record<string, string | boolean> = {},
+  ...children: (Node | string)[]
+): HTMLElementTagNameMap[K] {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+}
+
+function message(text: string) {
+  app.replaceChildren(el('p', { className: 'note' }, text));
+}
+
+/** The paper's venue pages' statistics, matched to its submissions; or the scope's own. */
+async function loadTabs(ctx: PP.Context): Promise<VenueTab[]> {
+  if (!ctx.page) return [];
+  if (ctx.page.kind === 'paper') {
+    const venues = ctx.scopes.filter((s) => s.kind === 'venue');
+    const [{ submissions }, lists] = await Promise.all([
+      pp.reviews.forPaper(),
+      Promise.all(venues.map((v) => pp.scope.scores(v.identifier).catch(() => null))),
+    ]);
+    return paperTabs(
+      submissions,
+      lists.filter((l): l is PP.ScoreList => l !== null),
+    );
+  }
+  return scopeTabs(await pp.scope.scores());
+}
+
+async function loadField(tab: VenueTab, summary: PP.ScoreSummary): Promise<PP.ScoreField> {
+  const key = `${tab.scope}\n${tab.venue.id}\n${summary.field}`;
+  return cached(store, key, summary.computedAt, () => pp.scope.scores(tab.scope, tab.venue.id, summary.field));
+}
+
+/** Pick the tab's field and fetch it (from the cache when it hasn't changed), then draw. */
+async function show() {
+  const token = ++loadToken;
+  const tab = tabs[tabIndex];
+  if (!tab) return message('No score statistics here yet.');
+  const summary = chooseField(tab.fields, pickedField ?? settings.field);
+  if (!summary) return message(`No score statistics for ${tab.venue.name} yet.`);
+  current = { tab, summary, field: null };
+  if (summary.hidden) return draw();
+  draw(true);
+  try {
+    const field = await loadField(tab, summary);
+    if (token !== loadToken) return;
+    current = { tab, summary, field };
+    draw();
+  } catch (e) {
+    if (token !== loadToken) return;
+    message(`Couldn't load the scores: ${(e as Error).message}`);
+  }
+}
+
+function controls(tab: VenueTab, summary: PP.ScoreSummary): HTMLElement {
+  const bar = el('div', { className: 'controls' });
+  if (tabs.length > 1) {
+    const list = el('div', { className: 'tabs' });
+    list.setAttribute('role', 'tablist');
+    list.setAttribute('aria-label', 'Venue');
+    tabs.forEach((t, i) => {
+      const button = el('button', { type: 'button', className: 'tab', textContent: t.venue.name });
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-selected', String(i === tabIndex));
+      if (t.submission?.status) button.title = `${t.venue.name}: ${t.submission.decision ?? t.submission.status.replace('_', ' ')}`;
+      button.addEventListener('click', () => {
+        tabIndex = i;
+        void show();
+      });
+      list.append(button);
+    });
+    bar.append(list);
+  }
+  if (tab.fields.length > 1) {
+    const select = el('select', { id: 'field' });
+    for (const f of tab.fields) select.append(el('option', { value: f.field, textContent: f.label, selected: f.field === summary.field }));
+    select.addEventListener('change', () => {
+      pickedField = select.value;
+      void show();
+      // The setting follows, so the next page opens on the same field; signed out it stays in this frame.
+      pp.settings.set('field', select.value).catch(() => {});
+    });
+    bar.append(el('label', { className: 'field', htmlFor: 'field' }, 'Score '), select);
+  } else {
+    bar.append(el('span', { className: 'field' }, summary.label));
+  }
+  return bar;
+}
+
+let summaryId = 0;
+
+function draw(loading = false) {
+  if (!current) return;
+  const { tab, summary, field } = current;
+  const parts: Node[] = [controls(tab, summary)];
+  if (summary.hidden) {
+    parts.push(
+      el(
+        'p',
+        { className: 'note' },
+        `${count(summary.count)} submissions at ${tab.venue.name} have a ${summary.label.toLowerCase()}. The site shows how they stand once the venue's decisions are out.`,
+      ),
+    );
+    app.replaceChildren(...parts);
+    return;
+  }
+  if (!field || loading) {
+    parts.push(el('p', { className: 'note' }, 'Loading…'));
+    app.replaceChildren(...parts);
+    return;
+  }
+  const split = splitOn(settings.splitByDecision, field.decisionsOut);
+  const mean = tab.submission ? paperMean(tab.submission, field.field) : null;
+  const standing = mean ? standingOf(field.values, mean) : null;
+  const label = standing ? markerLabel(standing) : null;
+  const width = Math.max(220, Math.floor(app.clientWidth || document.body.clientWidth || 300));
+  const describedBy = `summary-${++summaryId}`;
+  const options = { field, split, standing, label, width, describedBy };
+
+  if (standing) {
+    parts.push(
+      el(
+        'p',
+        { className: 'caption' },
+        el('strong', {}, scoreText(standing.mean)),
+        ` mean over ${standing.reviews} review${standing.reviews === 1 ? '' : 's'}, above ${count(standing.below)} of ${count(standing.size)}`,
+        standing.band ? ` · ${standing.band}` : '',
+      ),
+    );
+  } else if (tab.submission) {
+    parts.push(el('p', { className: 'caption' }, `This paper's reviews give no ${field.label.toLowerCase()}.`));
+  } else {
+    parts.push(el('p', { className: 'caption' }, `${count(field.values.length)} submissions at ${field.venue.name}`));
+  }
+  if (field.values.length === 0) {
+    parts.push(el('p', { className: 'note' }, 'No submission has this score yet.'));
+  } else {
+    if (settings.view !== 'curve') parts.push(histogram(options));
+    if (settings.view !== 'histogram') parts.push(curve(options));
+  }
+  if (split) {
+    const counts = outcomeCounts(field);
+    const decided = (field.split.accepted?.count ?? 0) + (field.split.rejected?.count ?? 0);
+    const legend = el('ul', { className: 'legend' });
+    for (const o of counts) {
+      legend.append(el('li', {}, el('span', { className: `swatch o-${o.outcome}` }), `${OUTCOME_LABELS[o.outcome]} ${count(o.count)}`));
+    }
+    if (decided) legend.append(el('li', { className: 'muted' }, `${shareText(field.split.accepted?.count ?? 0, decided)} accepted`));
+    parts.push(legend);
+  }
+  parts.push(el('p', { className: 'sr-only', id: describedBy }, summaryText({ field, standing, split })));
+  app.replaceChildren(...parts);
+}
+
+async function load(ctx: PP.Context) {
+  message('Loading…');
+  try {
+    tabs = await loadTabs(ctx);
+    tabIndex = Math.min(firstTab(tabs), Math.max(0, tabs.length - 1));
+    await show();
+  } catch (e) {
+    message(`Couldn't load the scores: ${(e as Error).message}`);
+  }
+}
+
+pp.ready.then((ctx) => {
+  settings = readSettings(ctx.settings);
+  pp.settings.onChange((next) => {
+    settings = readSettings(next);
+    pickedField = null;
+    void show();
+  });
+  pp.on('context.change', () => {
+    pickedField = null;
+    void load(pp.context!);
+  });
+  // Redraw at the frame's new width (a phone turned, the side column opened).
+  let lastWidth = app.clientWidth;
+  new ResizeObserver(() => {
+    if (Math.abs(app.clientWidth - lastWidth) < 4) return;
+    lastWidth = app.clientWidth;
+    draw();
+  }).observe(app);
+  void load(ctx);
+});
