@@ -16,9 +16,13 @@ const page = (kind: PP.PageKind, identifier: string, name = identifier): PP.Page
   name,
 });
 
-function summary(venue: { id: string; name: string }, field: string, extra: Partial<PP.ScoreSummary> = {}): PP.ScoreSummary {
+function summary(
+  venue: { id: string; name: string; page?: PP.PageSummary | null },
+  field: string,
+  extra: Partial<PP.ScoreSummary> = {},
+): PP.ScoreSummary {
   return {
-    venue,
+    venue: { page: null, ...venue },
     field,
     label: field[0].toUpperCase() + field.slice(1),
     count: 8,
@@ -76,6 +80,10 @@ interface Fake {
 function fakePp(context: Partial<PP.Context>, answers: {
   lists: Record<string, PP.ScoreList>;
   submissions?: PP.Submission[];
+  /** `marks` by scope, for `{ marks: true }`. */
+  marks?: Record<string, PP.ScoreMark[] | null>;
+  /** Values by scope, in place of the default field's. */
+  values?: Record<string, number[]>;
 }): Fake {
   const listeners = new Map<string, ((p: unknown) => void)[]>();
   const fake: Fake = {
@@ -119,13 +127,26 @@ function fakePp(context: Partial<PP.Context>, answers: {
       },
     },
     scope: {
-      scores: async (identifier?: string, venue?: string, field?: string) => {
-        fake.calls.push({ method: 'scope.scores', args: [identifier, venue, field].filter((a) => a !== undefined) });
-        const list = answers.lists[identifier ?? ctx.page!.identifier];
+      scores: async (identifier?: string, venue?: string, field?: string, options?: { marks?: boolean }) => {
+        fake.calls.push({
+          method: 'scope.scores',
+          args: [identifier, venue, field, options].filter((a) => a !== undefined),
+        });
+        const scope = identifier ?? ctx.page!.identifier;
+        const list = answers.lists[scope];
         if (!list) throw Object.assign(new Error('not a scope'), { code: 'Unavailable' });
-        if (!field) return list;
+        if (!venue) return list;
+        if (!field) return { ...list, scores: list.scores.filter((x) => x.venue.id === venue) };
         const s = list.scores.find((x) => x.venue.id === venue && x.field === field)!;
-        return scoreField(s, list.page);
+        const out = scoreField(s, list.page);
+        if (answers.values?.[scope]) out.values = answers.values[scope];
+        if (options?.marks) out.marks = answers.marks && scope in answers.marks ? answers.marks[scope] : [];
+        return out;
+      },
+    },
+    ui: {
+      openUrl: async (url: string) => {
+        fake.calls.push({ method: 'ui.openUrl', args: [url] });
       },
     },
   };
@@ -141,7 +162,7 @@ async function boot() {
   });
 }
 
-const fieldCalls = (fake: Fake) => fake.calls.filter((c) => c.method === 'scope.scores' && c.args.length === 3);
+const fieldCalls = (fake: Fake) => fake.calls.filter((c) => c.method === 'scope.scores' && c.args.length >= 3);
 
 beforeEach(() => {
   document.body.innerHTML = '<main id="app"></main>';
@@ -282,6 +303,100 @@ describe('on a venue', () => {
             page: ICLR_PAGE,
             hideUntil: 'decisions',
             scores: [summary(ICLR, 'rating', { hidden: true, decisionsOut: false })],
+          },
+        },
+      },
+    );
+    await boot();
+    expect(document.querySelector('.note')!.textContent).toMatch(/once the venue's decisions are out/);
+    expect(fieldCalls(fake)).toEqual([]);
+  });
+});
+
+describe('on an organisation', () => {
+  const org = page('org', 'org:eth', 'ETH Zurich');
+  const iclr = { ...ICLR, page: ICLR_PAGE };
+  const marks: PP.ScoreMark[] = [
+    { identifier: 'arxiv:2701.00001', address: '/abs/2701.00001', title: 'Attention again', mean: 3, outcome: 'rejected' },
+    { identifier: 'arxiv:2701.00002', address: '/abs/2701.00002', title: 'Linear everything', mean: 6.5, outcome: 'accepted' },
+  ];
+  const lists = (orgScores: PP.ScoreSummary[]) => ({
+    'org:eth': { page: org, hideUntil: 'never' as const, scores: orgScores },
+    [ICLR_PAGE.identifier]: {
+      page: ICLR_PAGE,
+      hideUntil: 'never' as const,
+      scores: [summary(iclr, 'rating', { computedAt: '2027-05-02T00:00:00.000Z' }), summary(iclr, 'soundness')],
+    },
+  });
+
+  it("draws the venue's whole distribution from its own page, with the organisation's papers as named open circles", async () => {
+    const fake = fakePp(
+      { page: org },
+      { lists: lists([summary(iclr, 'rating', { count: 2 })]), marks: { 'org:eth': marks }, values: { 'org:eth': [3, 6.5] } },
+    );
+    await boot();
+
+    // The org's list, the venue page's list for that venue, the venue's field, and the org's own by name.
+    expect(fake.calls.filter((c) => c.method === 'scope.scores').map((c) => c.args)).toEqual([
+      [],
+      ['venue:iclr/2027', ICLR.id],
+      ['venue:iclr/2027', ICLR.id, 'rating'],
+      ['org:eth', ICLR.id, 'rating', { marks: true }],
+    ]);
+    expect(document.querySelector('.caption')!.textContent).toBe("2 of ETH Zurich's submissions among 8 at ICLR 2027");
+    const [hist, curve] = [...document.querySelectorAll('svg[role=img]')];
+    expect(curve.getAttribute('aria-label')).toBe(
+      "Curve of rating means at ICLR 2027; ETH Zurich's 2 submissions marked",
+    );
+    // One open circle per paper on the curve; on the histogram, one per bar that holds some.
+    expect(curve.querySelectorAll('circle.mark').length).toBe(2);
+    expect(hist.querySelectorAll('circle.mark').length).toBe(2);
+    expect(document.querySelector('.you')).toBeNull();
+    const said = document.getElementById(curve.getAttribute('aria-describedby')!)!.textContent!;
+    expect(said).toContain('Rating at ICLR 2027: 8 submissions');
+    expect(said).toContain("2 of ETH Zurich's submissions are marked");
+    expect(said).toContain('Linear everything · 6.5, Top 15%, accepted');
+
+    // The arrow keys step from one marked paper to the next and name it; Enter opens it.
+    curve.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    const tip = curve.parentElement!.querySelector('.tip')!;
+    expect(tip.textContent).toContain('Attention again · 3');
+    curve.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(tip.textContent).toContain('Linear everything · 6.5, Top 15%, accepted');
+    expect(curve.querySelectorAll('circle.mark.on').length).toBe(1);
+    curve.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(fake.calls).toContainEqual({ method: 'ui.openUrl', args: ['https://site/abs/2701.00002'] });
+
+    // On the histogram, up and down move between the bars that hold its papers.
+    hist.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(hist.parentElement!.querySelector('.tip')!.textContent).toContain('Attention again');
+  });
+
+  it("falls back to the organisation's own numbers for a venue with no page, and says when there are too many to name", async () => {
+    const fake = fakePp(
+      { page: org },
+      { lists: { 'org:eth': { page: org, hideUntil: 'never', scores: [summary(ICLR, 'rating')] } }, marks: { 'org:eth': null } },
+    );
+    await boot();
+    expect(fake.calls.filter((c) => c.method === 'scope.scores').map((c) => c.args)).toEqual([
+      [],
+      ['org:eth', ICLR.id, 'rating'],
+      ['org:eth', ICLR.id, 'rating', { marks: true }],
+    ]);
+    expect(document.querySelector('.note')!.textContent).toMatch(/more submissions here than can be named/);
+    expect(document.querySelectorAll('circle.mark').length).toBe(0);
+  });
+
+  it("holds back when the site withholds the venue's numbers", async () => {
+    const fake = fakePp(
+      { page: org },
+      {
+        lists: {
+          'org:eth': { page: org, hideUntil: 'decisions', scores: [summary(iclr, 'rating')] },
+          [ICLR_PAGE.identifier]: {
+            page: ICLR_PAGE,
+            hideUntil: 'decisions',
+            scores: [summary(iclr, 'rating', { hidden: true, decisionsOut: false })],
           },
         },
       },

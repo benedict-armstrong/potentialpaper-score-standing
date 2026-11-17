@@ -4,7 +4,12 @@ import {
   binRange,
   chooseField,
   firstTab,
+  markText,
+  marksNear,
+  marksSummaryText,
+  orgTabs,
   paperMean,
+  placeMarks,
   paperTabs,
   readSettings,
   scopeTabs,
@@ -44,7 +49,7 @@ const submission = (
 });
 
 const summary = (venue: string, field: string, extra: Partial<PP.ScoreSummary> = {}): PP.ScoreSummary => ({
-  venue: { id: venue, name: venue.toUpperCase() },
+  venue: { id: venue, name: venue.toUpperCase(), page: null },
   field,
   label: field[0].toUpperCase() + field.slice(1),
   count: 10,
@@ -152,7 +157,7 @@ describe('standing and its words', () => {
   it('summarises the figure for a screen reader, with the accept rate when split', () => {
     const field = {
       label: 'Rating',
-      venue: { id: 'iclr', name: 'ICLR 2027' },
+      venue: { id: 'iclr', name: 'ICLR 2027', page: null },
       values,
       split: {
         accepted: { count: 3, values: [6, 7, 8], bins: { lo: 0, hi: 0, width: 0, counts: [] } },
@@ -187,6 +192,25 @@ describe('tabs', () => {
     expect(firstTab(tabs)).toBe(0);
   });
 
+  it("make an organisation's tabs draw each venue from its own page, marked with the organisation's papers", () => {
+    const edition = page('venue:iclr/2027');
+    const org = { ...page('org:eth'), kind: 'org' as const, name: 'ETH Zurich' };
+    const tabs = orgTabs({
+      page: org,
+      hideUntil: 'never',
+      scores: [
+        summary('iclr2027', 'rating', { venue: { id: 'iclr2027', name: 'ICLR 2027', page: edition } }),
+        summary('tmlr', 'rating'),
+      ],
+    });
+    expect(tabs.map((t) => [t.venue.id, t.scope, t.marks])).toEqual([
+      ['iclr2027', 'venue:iclr/2027', { scope: 'org:eth', name: 'ETH Zurich' }],
+      // No page of its own: the organisation's own distribution, still marked.
+      ['tmlr', 'org:eth', { scope: 'org:eth', name: 'ETH Zurich' }],
+    ]);
+    expect(firstTab(tabs)).toBe(0);
+  });
+
   it("make one tab per submission at a venue with statistics, oldest first, opening on the accepted one", () => {
     const submissions = [
       submission('iclr', [note('review', { rating: 8 }, '2027-11-01T00:00:00Z')], 'accepted'),
@@ -204,5 +228,39 @@ describe('tabs', () => {
     expect(firstTab(tabs)).toBe(1);
     expect(firstTab(tabs.slice(0, 1))).toBe(0);
     expect(firstTab([])).toBe(0);
+  });
+});
+
+describe('marks', () => {
+  const venue = [2, 3, 4, 4.5, 5, 6, 6.5, 8];
+  const marks: PP.ScoreMark[] = [
+    { identifier: 'arxiv:1', address: '/abs/1', title: 'Low', mean: 3, outcome: 'rejected' },
+    { identifier: 'arxiv:2', address: '/abs/2', title: 'High', mean: 6.5, outcome: 'accepted' },
+    { identifier: null, address: null, title: 'Unpublished', mean: 6.5, outcome: 'pending' },
+  ];
+
+  it("place each of an organisation's submissions in the venue's field", () => {
+    const placed = placeMarks(venue, marks);
+    expect(placed.map((m) => [m.title, m.below, m.band])).toEqual([
+      ['Low', 1, 'Bottom 14%'],
+      ['High', 6, 'Top 15%'],
+      ['Unpublished', 6, 'Top 15%'],
+    ]);
+    expect(markText(placed[1])).toBe('High · 6.5, Top 15%, accepted');
+    expect(markText(placed[2])).toBe('Unpublished · 6.5, Top 15%');
+  });
+
+  it('are named near the pointer, nearest first', () => {
+    expect(marksNear(marks, 6.4, 0.2).map((m) => m.title)).toEqual(['High', 'Unpublished']);
+    expect(marksNear(marks, 3.3, 0.2)).toEqual([]);
+    expect(marksNear(marks, 3.1, 0.2).map((m) => m.title)).toEqual(['Low']);
+  });
+
+  it('are summarised for a screen reader, best first', () => {
+    const text = marksSummaryText('ETH Zurich', placeMarks(venue, marks), venue);
+    expect(text).toBe(
+      "3 of ETH Zurich's submissions are marked, median 6.5 (Top 15%). High · 6.5, Top 15%, accepted; Unpublished · 6.5, Top 15%; Low · 3, Bottom 14%, rejected.",
+    );
+    expect(marksSummaryText('ETH Zurich', [], venue)).toBe("None of ETH Zurich's submissions here has this score.");
   });
 });

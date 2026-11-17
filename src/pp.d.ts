@@ -6,7 +6,7 @@
 declare namespace PP {
   type PageKind = 'paper' | 'venue' | 'topic' | 'org' | 'user';
 
-  type Permission = 'page.read' | 'scope.read' | 'reviews.read';
+  type Permission = 'page.read' | 'scope.read' | 'reviews.read' | 'identity';
   type Outcome = 'accepted' | 'rejected' | 'withdrawn' | 'pending';
 
   type ErrorCode = 'MethodNotFound' | 'PermissionDenied' | 'InvalidParams' | 'Unavailable' | 'Internal';
@@ -124,8 +124,12 @@ declare namespace PP {
 
   /** A score field at one venue of a scope, with counts. */
   interface ScoreSummary {
-    /** `<source>:<venue id>`: `openreview:ICLR.cc/2027/Conference`. A 6 at one venue is no 6 at another. */
-    venue: { id: string; name: string };
+    /**
+     * `<source>:<venue id>`: `openreview:ICLR.cc/2027/Conference`. A 6 at one venue is no 6 at another. `page` is the
+     * venue's own page, whose statistics of it are the whole venue's (a topic's or an org's are only its papers');
+     * `null` for a venue with no page.
+     */
+    venue: { id: string; name: string; page: PageSummary | null };
     /** The field's key in the venue's review forms (`rating`), and its label. */
     field: string;
     label: string;
@@ -155,6 +159,21 @@ declare namespace PP {
     bins: Bins;
     /** The same by outcome. */
     split: Record<Outcome, { count: number; values: number[]; bins: Bins }>;
+    /**
+     * With `{ marks: true }`: the scope's own submissions in this field, whose they are and their means, ascending, to
+     * mark on the venue's distribution. `null` when the scope has more than 1,000 here; empty when withheld.
+     */
+    marks?: ScoreMark[] | null;
+  }
+
+  /** One of a scope's submissions on a field: the paper and its mean. */
+  interface ScoreMark {
+    /** The paper's identifier and path; `null` for a paper with no identifier yet. */
+    identifier: string | null;
+    address: string | null;
+    title: string;
+    mean: number;
+    outcome: Outcome;
   }
 
   /** A paper of a scope, as `scope.papers` gives it. */
@@ -175,6 +194,26 @@ declare namespace PP {
       /** With `scores`: each review's score fields, by key. CC BY: keep `license` and `url` with them. */
       reviews?: { id: string; signature: string; scores: Record<string, number>; url: string | null; license: string }[];
     }[];
+  }
+
+  /**
+   * A token naming the reader to your own backend (`identity`). Your backend verifies it (ES256) against `jwksUrl`,
+   * with `iss` = `issuer` (the site's origin) and `aud` = `audience` (your plugin's id), and checks `exp`.
+   */
+  interface IdentityToken {
+    /** The JWT. Claims: `iss`, `aud`, `sub`, `handle`, `plugin`, `iat`, `nbf`, `exp`, `jti` (and `dev: true` from localhost). */
+    token: string;
+    /** When it stops verifying (five minutes after it was made). */
+    expiresAt: string;
+    /** Your plugin's id; `dev:<id>` when it is loaded from localhost. */
+    audience: string;
+    issuer: string;
+    /** The reader's `sub` for your plugin: stable across handle changes, and different for every plugin. */
+    subject: string;
+    /** The reader's handle, as the site shows it. */
+    handle: string;
+    /** `<site>/.well-known/jwks.json`. */
+    jwksUrl: string;
   }
 
   interface SDK {
@@ -221,10 +260,17 @@ declare namespace PP {
       /**
        * Needs `scope.read`: a venue's, topic's or org's score statistics, the current page by default. Without `venue`
        * and `field`, the list of venues and fields; with both, that field's sorted means, bins and split by outcome.
+       * `{ marks: true }` adds the scope's own submissions by name (`marks`). For a whole venue's numbers on a topic's or
+       * an org's page, ask the venue's own page: `scores(summary.venue.page.identifier, venue, field)`.
        */
       scores(identifier?: string): Promise<ScoreList>;
       scores(identifier: string | undefined, venue: string): Promise<ScoreList>;
-      scores(identifier: string | undefined, venue: string, field: string): Promise<ScoreField>;
+      scores(
+        identifier: string | undefined,
+        venue: string,
+        field: string,
+        options?: { marks?: boolean },
+      ): Promise<ScoreField>;
       /**
        * Needs `scope.read`: every paper of a scope, rolled up, fetched in chunks. Resolves with them all, or with `[]`
        * when `onChunk` takes each chunk as it comes. `fields` defaults to all three.
@@ -241,6 +287,15 @@ declare namespace PP {
     reviews: {
       /** Needs `reviews.read`: a paper's submissions, notes and venue forms. The current paper by default. */
       forPaper(identifier?: string): Promise<{ submissions: Submission[] }>;
+    };
+    identity: {
+      /**
+       * Needs `identity`: a token naming the reader, for your backend (one of your `network` origins). Fails with
+       * `Unavailable` when the reader is signed out. The host keeps a token while it has more than a minute left.
+       */
+      token(): Promise<IdentityToken>;
+      /** `fetch` with `Authorization: Bearer <token>` added. */
+      fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
     };
     ui: {
       /** Size the frame yourself; this turns off the automatic sizing to your body's height. */

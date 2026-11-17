@@ -5,9 +5,11 @@
  * - on a paper (the side column): the paper's standing at its venue, a tab per venue it went to;
  * - on a venue (the main column): the whole distribution, split by decision once decisions are out, a tab per
  *   venue on a series;
- * - on an organisation: its papers' distribution per venue, as on a venue, until org pages have members (see README).
+ * - on an organisation: each venue's whole distribution (from the venue's own page), with the organisation's
+ *   submissions as open circles on it, named on hover (acceptodds' `marks`); a tab per venue.
  *
- * Data comes from the site's score statistics only (`pp.scope.scores`), plus the paper's own reviews for its mean.
+ * Data comes from the site's score statistics only (`pp.scope.scores`, with `marks` for the organisation's papers by
+ * name), plus the paper's own reviews for its mean.
  */
 import './style.css';
 import { cached, defaultStore } from './cache';
@@ -17,6 +19,10 @@ import {
   count,
   firstTab,
   markerLabel,
+  marksSummaryText,
+  orgTabs,
+  placeMarks,
+  type PlacedMark,
   OUTCOME_LABELS,
   outcomeCounts,
   paperMean,
@@ -40,8 +46,16 @@ let tabs: VenueTab[] = [];
 let tabIndex = 0;
 /** The field picked in this frame, ahead of the setting's round trip. */
 let pickedField: string | null = null;
-let current: { tab: VenueTab; summary: PP.ScoreSummary; field: PP.ScoreField | null } | null = null;
+let current: {
+  tab: VenueTab;
+  summary: PP.ScoreSummary;
+  field: PP.ScoreField | null;
+  /** On an organisation: its submissions in this field (`null`: too many to name). */
+  marks?: PP.ScoreMark[] | null;
+} | null = null;
 let loadToken = 0;
+/** The venue pages' lists asked for in this load, by `<page>\n<venue>`: small, and asked once per page. */
+let venueLists = new Map<string, Promise<PP.ScoreList>>();
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -71,12 +85,31 @@ async function loadTabs(ctx: PP.Context): Promise<VenueTab[]> {
       lists.filter((l): l is PP.ScoreList => l !== null),
     );
   }
+  if (ctx.page.kind === 'org') return orgTabs(await pp.scope.scores());
   return scopeTabs(await pp.scope.scores());
 }
 
-async function loadField(tab: VenueTab, summary: PP.ScoreSummary): Promise<PP.ScoreField> {
-  const key = `${tab.scope}\n${tab.venue.id}\n${summary.field}`;
-  return cached(store, key, summary.computedAt, () => pp.scope.scores(tab.scope, tab.venue.id, summary.field));
+async function loadField(scope: string, summary: PP.ScoreSummary, marks = false): Promise<PP.ScoreField> {
+  const key = `${marks ? 'marks\n' : ''}${scope}\n${summary.venue.id}\n${summary.field}`;
+  return cached(store, key, summary.computedAt, () =>
+    pp.scope.scores(scope, summary.venue.id, summary.field, marks ? { marks: true } : undefined),
+  );
+}
+
+/**
+ * The summary of the field the distribution is drawn from: the tab's own, or on an organisation the venue page's
+ * (whose `computedAt` and `hidden` are the whole venue's). `null` when the venue's page has no such field.
+ */
+async function distributionSummary(tab: VenueTab, summary: PP.ScoreSummary): Promise<PP.ScoreSummary | null> {
+  if (!tab.marks || tab.scope === tab.marks.scope) return summary;
+  const key = `${tab.scope}\n${tab.venue.id}`;
+  let list = venueLists.get(key);
+  if (!list) {
+    list = pp.scope.scores(tab.scope, tab.venue.id);
+    venueLists.set(key, list);
+    list.catch(() => venueLists.delete(key));
+  }
+  return (await list).scores.find((s) => s.venue.id === tab.venue.id && s.field === summary.field) ?? null;
 }
 
 /** Pick the tab's field and fetch it (from the cache when it hasn't changed), then draw. */
@@ -90,7 +123,25 @@ async function show() {
   if (summary.hidden) return draw();
   draw(true);
   try {
-    const field = await loadField(tab, summary);
+    if (tab.marks) {
+      // The venue's whole field, and the organisation's submissions in it by name.
+      const whole = await distributionSummary(tab, summary);
+      if (token !== loadToken) return;
+      const scope = whole ? tab.scope : tab.marks.scope;
+      const shown = whole ?? summary;
+      if (shown.hidden) {
+        current = { tab, summary: shown, field: null };
+        return draw();
+      }
+      const [field, own] = await Promise.all([
+        loadField(scope, shown),
+        loadField(tab.marks.scope, summary, true),
+      ]);
+      if (token !== loadToken) return;
+      current = { tab, summary, field, marks: own.marks ?? null };
+      return draw();
+    }
+    const field = await loadField(tab.scope, summary);
     if (token !== loadToken) return;
     current = { tab, summary, field };
     draw();
@@ -139,7 +190,7 @@ let summaryId = 0;
 
 function draw(loading = false) {
   if (!current) return;
-  const { tab, summary, field } = current;
+  const { tab, summary, field, marks } = current;
   const parts: Node[] = [controls(tab, summary)];
   if (summary.hidden) {
     parts.push(
@@ -163,7 +214,19 @@ function draw(loading = false) {
   const label = standing ? markerLabel(standing) : null;
   const width = Math.max(220, Math.floor(app.clientWidth || document.body.clientWidth || 300));
   const describedBy = `summary-${++summaryId}`;
-  const options = { field, split, standing, label, width, describedBy };
+  const placed: PlacedMark[] | null = tab.marks && marks ? placeMarks(field.values, marks) : null;
+  const options = {
+    field,
+    split,
+    standing,
+    label,
+    width,
+    describedBy,
+    marks: tab.marks && placed ? { name: tab.marks.name, list: placed } : null,
+    open: (mark: PlacedMark) => {
+      if (mark.address) pp.ui.openUrl(new URL(mark.address, pp.context?.site ?? location.origin).toString()).catch(() => {});
+    },
+  };
 
   if (standing) {
     parts.push(
@@ -177,6 +240,20 @@ function draw(loading = false) {
     );
   } else if (tab.submission) {
     parts.push(el('p', { className: 'caption' }, `This paper's reviews give no ${field.label.toLowerCase()}.`));
+  } else if (tab.marks && placed) {
+    parts.push(
+      el(
+        'p',
+        { className: 'caption' },
+        el('span', { className: 'mark-key' }),
+        `${count(placed.length)} of ${tab.marks.name}'s submission${placed.length === 1 ? '' : 's'} among ${count(field.values.length)} at ${field.venue.name}`,
+      ),
+    );
+  } else if (tab.marks) {
+    parts.push(el('p', { className: 'caption' }, `${count(field.values.length)} submissions at ${field.venue.name}`));
+    parts.push(
+      el('p', { className: 'note' }, `${tab.marks.name} has more submissions here than can be named one by one (over 1,000).`),
+    );
   } else {
     parts.push(el('p', { className: 'caption' }, `${count(field.values.length)} submissions at ${field.venue.name}`));
   }
@@ -196,12 +273,15 @@ function draw(loading = false) {
     if (decided) legend.append(el('li', { className: 'muted' }, `${shareText(field.split.accepted?.count ?? 0, decided)} accepted`));
     parts.push(legend);
   }
-  parts.push(el('p', { className: 'sr-only', id: describedBy }, summaryText({ field, standing, split })));
+  const said = summaryText({ field, standing, split });
+  const marked = tab.marks && placed ? ` ${marksSummaryText(tab.marks.name, placed, field.values)}` : '';
+  parts.push(el('p', { className: 'sr-only', id: describedBy }, said + marked));
   app.replaceChildren(...parts);
 }
 
 async function load(ctx: PP.Context) {
   message('Loading…');
+  venueLists = new Map();
   try {
     tabs = await loadTabs(ctx);
     tabIndex = Math.min(firstTab(tabs), Math.max(0, tabs.length - 1));

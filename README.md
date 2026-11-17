@@ -9,9 +9,10 @@ for review scores.
   (rejected at one, accepted at the next) gets a tab per venue.
 - **On a venue** (main column): the whole distribution, split by decision once decisions are out, which shows the
   accept rate at each score. A series gets a tab per edition.
-- **On an organisation**: its papers' distribution at each venue, drawn as on a venue. The view the plan describes
-  (the venue's distribution with the org's papers as open circles, named on hover) waits for organisation pages to
-  have members; see "Later".
+- **On an organisation** (main column): each venue its papers went to, drawn whole from the venue's own page, with
+  the organisation's submissions as open circles on the curve (and above their bars on the histogram), named on
+  hover with their mean and band; up and down arrows step from one to the next, and a click or Enter opens the paper.
+  A tab per venue. A venue with no page of its own (a track) shows the organisation's own distribution, still marked.
 
 Two figures, because review scores are discrete (ICLR rates on {1, 3, 5, 6, 8, 10}), so means bunch at a few
 values. The **histogram** shows that bunching honestly. The **curve** is a kernel density whose bandwidth is never
@@ -34,7 +35,9 @@ The field switcher above the figure sets `field`. In `settings.json` they are
 ## Permissions and data
 
 - `scope.read`: the site's score statistics (`pp.scope.scores`), per venue and score field: every submission's
-  mean, sorted, the bins and the split by outcome. The figure needs nothing else.
+  mean, sorted, the bins and the split by outcome. On an organisation, the venue's own page (`venue.page` in the
+  list) gives the whole distribution, and `{ marks: true }` on the organisation's field names its submissions with
+  their means (up to 1,000; more are drawn without names). The figure needs nothing else.
 - `reviews.read`: the paper's own reviews (`pp.reviews.forPaper`), for its mean.
 
 No network access of its own. Each field fetched is kept in the plugin's own IndexedDB, stamped with the
@@ -64,9 +67,7 @@ under Discover.
 
 ## Later
 
-- **Org view** (v0.2, when organisation pages have members): the venue's whole distribution, with the org's papers
-  as open circles on the curve, named on hover.
-- **Before and after rebuttal** (v0.2): the paper's position from the review files' git history; needs a
+- **Before and after rebuttal**: the paper's position from the review files' git history; needs a
   `reviews.history` method in the host.
 
 MIT licence.

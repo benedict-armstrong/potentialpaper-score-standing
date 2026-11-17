@@ -6,7 +6,7 @@
  */
 import { niceTicks, yAt } from './distribution';
 import { curveModel, curveReadout, histogramModel, type Layer } from './figures';
-import { binRange, count, OUTCOME_LABELS, scoreText, shareText, type Standing } from './standing';
+import { binIndex, binRange, count, markText, marksNear, OUTCOME_LABELS, type PlacedMark, scoreText, shareText, type Standing } from './standing';
 
 const PAD = { top: 26, right: 10, bottom: 24, left: 10 };
 const GAP = 1;
@@ -31,6 +31,29 @@ interface FigureOptions {
   width: number;
   /** The id of the summary the figure is described by. */
   describedBy: string;
+  /** On an organisation: its submissions, as open circles on the venue's distribution, named on hover. */
+  marks?: { name: string; list: readonly PlacedMark[] } | null;
+  /** Opens a marked paper (a click on its circle, or Enter on it). */
+  open?: (mark: PlacedMark) => void;
+}
+
+/** How many named marks a tooltip lists before "and N more". */
+const TIP_MARKS = 4;
+/** How near the pointer a mark must be to be named, in pixels. */
+const NEAR_PX = 6;
+
+function marksHtml(marks: readonly PlacedMark[], name: string): string {
+  if (marks.length === 0) return '';
+  const shown = marks.slice(0, TIP_MARKS);
+  const more = marks.length - shown.length;
+  return `<ul class="tip-marks" aria-label="${esc(name)}">${shown.map((m) => `<li>${esc(markText(m))}</li>`).join('')}${more > 0 ? `<li class="muted">and ${count(more)} more</li>` : ''}</ul>`;
+}
+
+/** The label's tail: "; ETH Zurich's 12 submissions marked". */
+function marksLabel(o: FigureOptions): string {
+  if (!o.marks) return '';
+  const n = o.marks.list.length;
+  return `; ${o.marks.name}'s ${count(n)} submission${n === 1 ? '' : 's'} marked`;
 }
 
 /** Position a tooltip beside `x` within the figure. */
@@ -109,6 +132,18 @@ export function histogram(o: FigureOptions): HTMLElement {
     parts.push(`<line class="mine-tick" x1="${mx.toFixed(1)}" x2="${mx.toFixed(1)}" y1="${base + 1}" y2="${base + 6}"/>`);
     if (o.label) parts.push(markerText(mx, width, o.label));
   }
+  // The organisation's submissions: an open circle above each bar that holds some, sized by how many.
+  const marksIn: PlacedMark[][] = Array.from({ length: n }, () => []);
+  for (const mark of o.marks?.list ?? []) {
+    const i = binIndex(m.bins, mark.mean);
+    if (i >= 0) marksIn[i].push(mark);
+  }
+  marksIn.forEach((list, i) => {
+    if (list.length === 0) return;
+    const r = Math.min(Math.max(2.5, slot / 2 - 1), 3 + Math.sqrt(list.length - 1));
+    const cy = Math.max(PAD.top - 4 + r, base - h(m.totals[i]) - r - 2);
+    parts.push(`<circle class="mark" data-bin="${i}" cx="${(x0(i) + slot / 2).toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}"/>`);
+  });
   parts.push(`<line class="axis" x1="${PAD.left}" x2="${width - PAD.right}" y1="${base}" y2="${base}"/>`);
   for (const t of niceTicks(m.bins.lo, m.bins.hi, Math.max(2, Math.floor(plotW / 70)))) {
     const x = PAD.left + ((t - m.bins.lo) / Math.max(1e-9, m.bins.hi - m.bins.lo)) * plotW;
@@ -118,7 +153,7 @@ export function histogram(o: FigureOptions): HTMLElement {
   const svg = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join('')}${hover}</svg>`;
   const { root, svg: el, tip } = shell(
     svg,
-    `Histogram of ${field.label.toLowerCase()} means at ${field.venue.name}${o.label ? `; ${o.label}` : ''}`,
+    `Histogram of ${field.label.toLowerCase()} means at ${field.venue.name}${o.label ? `; ${o.label}` : ''}${marksLabel(o)}`,
     o.describedBy,
   );
   const hoverRect = el.querySelector<SVGRectElement>('.hover')!;
@@ -128,6 +163,7 @@ export function histogram(o: FigureOptions): HTMLElement {
     if (i === null) {
       tip.hidden = true;
       hoverRect.setAttribute('visibility', 'hidden');
+      for (const c of el.querySelectorAll('circle.mark.on')) c.classList.remove('on');
       return;
     }
     hoverRect.setAttribute('x', x0(i).toFixed(1));
@@ -145,6 +181,8 @@ export function histogram(o: FigureOptions): HTMLElement {
         .map((l) => `${count(of(l))} ${OUTCOME_LABELS[l.outcome].toLowerCase()}`)
         .join(', ')}${decided ? `; ${shareText(acc ? of(acc) : 0, decided)} accepted` : ''}</div>`;
     }
+    if (o.marks) html += marksHtml(marksIn[i], o.marks.name);
+    for (const c of el.querySelectorAll('circle.mark')) c.classList.toggle('on', c.getAttribute('data-bin') === String(i));
     placeTip(tip, x0(i) + (i < n / 2 ? slot : 0), width, html);
   };
   el.addEventListener('pointermove', (e) => {
@@ -155,6 +193,16 @@ export function histogram(o: FigureOptions): HTMLElement {
   el.addEventListener('pointerleave', () => show(null));
   el.addEventListener('blur', () => show(null));
   el.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      // Between the bars that hold the organisation's submissions.
+      const held = marksIn.flatMap((list, i) => (list.length ? [i] : []));
+      if (held.length === 0) return;
+      e.preventDefault();
+      const from = at ?? (e.key === 'ArrowUp' ? -1 : n);
+      const next = e.key === 'ArrowUp' ? held.find((i) => i > from) : [...held].reverse().find((i) => i < from);
+      show(next ?? (e.key === 'ArrowUp' ? held[0] : held[held.length - 1]));
+      return;
+    }
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
     const from = at ?? m.mine ?? Math.floor(n / 2);
@@ -221,12 +269,20 @@ export function curve(o: FigureOptions): HTMLElement {
     if (o.label) parts.push(markerText(youX, width, o.label));
   }
   parts.push(`<line class="hover" x1="0" x2="0" y1="${PAD.top}" y2="${base}" visibility="hidden"/>`);
+  // The organisation's submissions: open circles on the curve at their means (acceptodds' `marks`).
+  const marks = o.marks?.list ?? [];
+  marks.forEach((mark, i) => {
+    parts.push(`<circle class="mark" data-mark="${i}" cx="${sx(mark.mean).toFixed(1)}" cy="${sy(yAt(m, mark.mean)).toFixed(1)}" r="3.5"/>`);
+  });
   const svg = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join('')}</svg>`;
   const { root, svg: el, tip } = shell(
     svg,
-    `Curve of ${field.label.toLowerCase()} means at ${field.venue.name}${o.label ? `; ${o.label}` : ''}`,
+    `Curve of ${field.label.toLowerCase()} means at ${field.venue.name}${o.label ? `; ${o.label}` : ''}${marksLabel(o)}`,
     o.describedBy,
   );
+  const circles = [...el.querySelectorAll<SVGCircleElement>('circle.mark')];
+  /** The marks named now, nearest first; the first is what a click or Enter opens. */
+  let named: PlacedMark[] = [];
   const hoverLine = el.querySelector<SVGLineElement>('.hover')!;
   const values = field.values;
   let at: number | null = null;
@@ -235,9 +291,13 @@ export function curve(o: FigureOptions): HTMLElement {
     if (x === null) {
       tip.hidden = true;
       hoverLine.setAttribute('visibility', 'hidden');
+      named = [];
+      for (const c of circles) c.classList.remove('on');
       return;
     }
     const px = sx(x);
+    named = marksNear(marks, x, (NEAR_PX / plotW) * (hi - lo));
+    circles.forEach((c, i) => c.classList.toggle('on', named.includes(marks[i])));
     hoverLine.setAttribute('x1', px.toFixed(1));
     hoverLine.setAttribute('x2', px.toFixed(1));
     hoverLine.setAttribute('visibility', 'visible');
@@ -247,7 +307,7 @@ export function curve(o: FigureOptions): HTMLElement {
       tip,
       px,
       width,
-      `<span class="mono">${scoreText(x)}</span> <span class="muted">${count(r.below)} paper${r.below === 1 ? '' : 's'} below (${shareText(r.below, values.length)})</span>${rate}`,
+      `<span class="mono">${scoreText(x)}</span> <span class="muted">${count(r.below)} paper${r.below === 1 ? '' : 's'} below (${shareText(r.below, values.length)})</span>${rate}${o.marks ? marksHtml(named, o.marks.name) : ''}`,
     );
   };
   const invert = (px: number) => lo + ((px - PAD.left) / plotW) * (hi - lo);
@@ -258,7 +318,28 @@ export function curve(o: FigureOptions): HTMLElement {
   });
   el.addEventListener('pointerleave', () => show(null));
   el.addEventListener('blur', () => show(null));
+  el.style.cursor = '';
+  el.addEventListener('pointermove', () => {
+    el.style.cursor = named.length && named[0].address && o.open ? 'pointer' : '';
+  });
+  el.addEventListener('click', () => {
+    if (named.length && named[0].address && o.open) o.open(named[0]);
+  });
   el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && named.length && named[0].address && o.open) {
+      e.preventDefault();
+      o.open(named[0]);
+      return;
+    }
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && marks.length) {
+      // From one marked submission to the next (ascending by mean).
+      e.preventDefault();
+      const from = at ?? (e.key === 'ArrowUp' ? -Infinity : Infinity);
+      const next =
+        e.key === 'ArrowUp' ? marks.find((mk) => mk.mean > from + 1e-9) : [...marks].reverse().find((mk) => mk.mean < from - 1e-9);
+      show((next ?? (e.key === 'ArrowUp' ? marks[0] : marks[marks.length - 1])).mean);
+      return;
+    }
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
     const step = (hi - lo) / 40;

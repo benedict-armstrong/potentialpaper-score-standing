@@ -143,8 +143,7 @@ export function summaryText(options: {
 }): string {
   const { field, standing, split } = options;
   const n = field.values.length;
-  const sorted = field.values;
-  const median = n ? (n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2) : NaN;
+  const median = medianOf(field.values);
   const parts = [
     `${field.label} at ${field.venue.name}: ${count(n)} submission${n === 1 ? '' : 's'}, median ${scoreText(median)}.`,
   ];
@@ -167,11 +166,13 @@ export function summaryText(options: {
 
 /** One tab of the panel: a venue, its fields, the scope page whose statistics hold it, and (on a paper) the submission. */
 export interface VenueTab {
-  venue: { id: string; name: string };
-  /** The page `scope.scores` is asked about. */
+  venue: { id: string; name: string; page?: PP.PageSummary | null };
+  /** The page `scope.scores` is asked about for the distribution. */
   scope: string;
   fields: PP.ScoreSummary[];
   submission: PP.Submission | null;
+  /** On an organisation: the page whose own submissions are marked on the venue's distribution, by name. */
+  marks?: { scope: string; name: string } | null;
 }
 
 /** A scope's statistics as tabs: one per venue, in the list's order (most submissions first). */
@@ -186,6 +187,70 @@ export function scopeTabs(list: PP.ScoreList): VenueTab[] {
     tab.fields.push(summary);
   }
   return [...tabs.values()];
+}
+
+/**
+ * An organisation's tabs: one per venue its papers went to, each drawing the venue's whole distribution (from the
+ * venue's own page) with the organisation's submissions marked on it. A venue with no page of its own (a track) draws
+ * the organisation's own distribution instead, still marked.
+ */
+export function orgTabs(list: PP.ScoreList): VenueTab[] {
+  return scopeTabs(list).map((tab) => ({
+    ...tab,
+    scope: tab.venue.page?.identifier ?? list.page.identifier,
+    marks: { scope: list.page.identifier, name: list.page.name },
+  }));
+}
+
+/** A marked submission with where it stands in the venue's field. */
+export interface PlacedMark extends PP.ScoreMark {
+  below: number;
+  /** "Top 12%", or `null` in a field of one. */
+  band: string | null;
+}
+
+/** Each mark's place among the venue's sorted `values`. */
+export function placeMarks(values: readonly number[], marks: readonly PP.ScoreMark[]): PlacedMark[] {
+  return marks.map((mark) => {
+    const below = countBelow(values, mark.mean);
+    const ahead = percentAhead(below, Math.max(values.length, below + 1));
+    return { ...mark, below, band: ahead === null ? null : standingBand(ahead) };
+  });
+}
+
+/** The marks within `radius` of `x` (in the figure's own units), nearest first. */
+export function marksNear<T extends { mean: number }>(marks: readonly T[], x: number, radius: number): T[] {
+  return marks
+    .filter((m) => Math.abs(m.mean - x) <= radius)
+    .sort((a, b) => Math.abs(a.mean - x) - Math.abs(b.mean - x));
+}
+
+/** "Paper title · 6.5, Top 12%, accepted". */
+export function markText(mark: PlacedMark): string {
+  const outcome = mark.outcome === 'pending' ? '' : `, ${OUTCOME_LABELS[mark.outcome].toLowerCase()}`;
+  return `${mark.title} · ${scoreText(mark.mean)}${mark.band ? `, ${mark.band}` : ''}${outcome}`;
+}
+
+/** The median of ascending numbers; `NaN` when empty. */
+function medianOf(sorted: readonly number[]): number {
+  const n = sorted.length;
+  return n ? (n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2) : NaN;
+}
+
+/**
+ * What a screen reader hears about the organisation's marks: how many, their median and its place, and each paper
+ * with its mean and band (up to ten, best first).
+ */
+export function marksSummaryText(org: string, marks: readonly PlacedMark[], values: readonly number[]): string {
+  if (marks.length === 0) return `None of ${org}'s submissions here has this score.`;
+  const median = medianOf(marks.map((m) => m.mean));
+  const below = countBelow(values, median);
+  const ahead = percentAhead(below, Math.max(values.length, below + 1));
+  const best = [...marks].sort((a, b) => b.mean - a.mean).slice(0, 10);
+  return [
+    `${count(marks.length)} of ${org}'s submissions are marked, median ${scoreText(median)}${ahead === null ? '' : ` (${standingBand(ahead)})`}.`,
+    `${best.map(markText).join('; ')}${marks.length > best.length ? `; and ${count(marks.length - best.length)} more` : ''}.`,
+  ].join(' ');
 }
 
 /** When a submission was under review: its first note, or when the site fetched it. */

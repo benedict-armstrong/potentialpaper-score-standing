@@ -1,9 +1,9 @@
 {
   "id": "benedict-armstrong/score-standing",
   "name": "Score standing",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
-  "description": "Where a paper's review scores stand among the submissions at its venue, and a venue's whole distribution: a histogram and a curve, split by decision once decisions are out.",
+  "description": "Where a paper's review scores stand among the submissions at its venue, a venue's whole distribution, and an organisation's papers marked on each of its venues': a histogram and a curve, split by decision once decisions are out.",
   "author": "Benedict Armstrong",
   "homepage": "https://github.com/benedict-armstrong/potentialpaper-score-standing",
   "main": "dist/index.html",
