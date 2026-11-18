@@ -9,6 +9,8 @@ import { curveModel, curveReadout, histogramModel, type Layer } from './figures'
 import { binIndex, binRange, count, markText, marksNear, OUTCOME_LABELS, type PlacedMark, scoreText, shareText, type Standing } from './standing';
 
 const PAD = { top: 26, right: 10, bottom: 24, left: 10 };
+/** Both figures are this tall, so switching between the bar chart and the distribution keeps the frame's size. */
+const FIGURE_HEIGHT = 180;
 const GAP = 1;
 
 const esc = (s: string) =>
@@ -94,7 +96,7 @@ function shell(svg: string, label: string, describedBy: string): { root: HTMLEle
 export function histogram(o: FigureOptions): HTMLElement {
   const { field, width } = o;
   const m = histogramModel(field, o.split, o.standing?.mean ?? null);
-  const height = 150;
+  const height = FIGURE_HEIGHT;
   const n = m.totals.length;
   const plotW = width - PAD.left - PAD.right;
   const plotH = height - PAD.top - PAD.bottom;
@@ -104,10 +106,6 @@ export function histogram(o: FigureOptions): HTMLElement {
   const h = (c: number) => (c === 0 ? 0 : Math.max(2, (c / m.peak) * plotH));
   const parts: string[] = [];
 
-  if (m.mine !== null) {
-    // The share below: a band behind the bars up to the paper's bin.
-    parts.push(`<rect class="below" x="${PAD.left}" y="${PAD.top}" width="${(x0(m.mine) - PAD.left).toFixed(1)}" height="${plotH}"/>`);
-  }
   for (let i = 0; i < n; i += 1) {
     const x = x0(i) + GAP / 2;
     const w = Math.max(1, slot - GAP).toFixed(1);
@@ -123,7 +121,8 @@ export function histogram(o: FigureOptions): HTMLElement {
         parts.push(`<rect class="mine-outline" x="${x.toFixed(1)}" y="${(base - h(m.totals[i])).toFixed(1)}" width="${w}" height="${h(m.totals[i]).toFixed(1)}"/>`);
       }
     } else {
-      const cls = m.mine === null ? 'bar' : i === m.mine ? 'bar mine' : i < m.mine ? 'bar under' : 'bar';
+      // Only the paper's own bar is marked; the ones below it are drawn as the rest.
+      const cls = i === m.mine ? 'bar mine' : 'bar';
       parts.push(`<rect class="${cls}" x="${x.toFixed(1)}" y="${(base - h(m.totals[i])).toFixed(1)}" width="${w}" height="${h(m.totals[i]).toFixed(1)}"/>`);
     }
   }
@@ -222,7 +221,7 @@ export function curve(o: FigureOptions): HTMLElement {
   const { field, width } = o;
   const mean = o.standing?.mean ?? null;
   const m = curveModel(field, o.split, mean);
-  const height = 160;
+  const height = FIGURE_HEIGHT;
   const plotW = width - PAD.left - PAD.right;
   const plotH = height - PAD.top - PAD.bottom;
   const [lo, hi] = m.domain;

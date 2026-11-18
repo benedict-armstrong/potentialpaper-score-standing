@@ -72,14 +72,14 @@ const page = (identifier: string): PP.PageSummary => ({
 
 describe('settings', () => {
   it('reads leniently: anything unexpected is the default', () => {
-    expect(readSettings(undefined)).toEqual({ view: 'both', field: '', splitByDecision: 'auto' });
+    expect(readSettings(undefined)).toEqual({ view: 'histogram', field: '', splitByDecision: 'auto' });
     expect(readSettings({ view: 'curve', field: ' soundness ', splitByDecision: 'off' })).toEqual({
       view: 'curve',
       field: 'soundness',
       splitByDecision: 'off',
     });
     expect(readSettings({ view: 'pie', field: 3, splitByDecision: true })).toEqual({
-      view: 'both',
+      view: 'histogram',
       field: '',
       splitByDecision: 'auto',
     });

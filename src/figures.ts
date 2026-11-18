@@ -66,8 +66,9 @@ export interface CurveModel {
 
 /**
  * The curve: a kernel density of the means (one kernel for the whole field, `bandwidth`), root-scaled. Its domain is
- * the form's range when the form gives one (no score falls outside it), else three kernels past the extremes, and
- * always takes in `include` (the paper's mean).
+ * the venue's scale, as acceptodds draws it: the form's range when the form gives one (no score falls outside it),
+ * else the means' extremes rounded out to whole scores (a scale's ends are whole, so this never runs past them, as
+ * 0.5 on a 1–4 scale would). It always takes in `include` (the paper's mean). The curve stops at the ends.
  */
 export function curveModel(
   field: Pick<PP.ScoreField, 'values' | 'split' | 'min' | 'max'>,
@@ -77,8 +78,8 @@ export function curveModel(
 ): CurveModel {
   const values = field.values;
   const h = bandwidth(values);
-  let lo = field.min ?? (values[0] ?? 0) - 3 * h;
-  let hi = field.max ?? (values[values.length - 1] ?? 0) + 3 * h;
+  let lo = field.min ?? Math.floor(values[0] ?? 0);
+  let hi = field.max ?? Math.ceil(values[values.length - 1] ?? 0);
   if (values.length) {
     lo = Math.min(lo, values[0]);
     hi = Math.max(hi, values[values.length - 1]);

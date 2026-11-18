@@ -24,6 +24,8 @@ import {
   placeMarks,
   type PlacedMark,
   OUTCOME_LABELS,
+  OUTCOMES,
+  type Outcome,
   outcomeCounts,
   paperMean,
   paperTabs,
@@ -39,6 +41,8 @@ import {
 } from './standing';
 
 const app = document.getElementById('app')!;
+/** The figures stop growing here, so a wide column doesn't stretch them; the text around them still runs full width. */
+const MAX_FIGURE_WIDTH = 720;
 const store = defaultStore<PP.ScoreField>();
 
 let settings: Settings = readSettings(null);
@@ -157,25 +161,56 @@ async function show() {
   }
 }
 
-function controls(tab: VenueTab, summary: PP.ScoreSummary): HTMLElement {
-  const bar = el('div', { className: 'controls' });
-  if (tabs.length > 1) {
-    const list = el('div', { className: 'tabs' });
-    list.setAttribute('role', 'tablist');
-    list.setAttribute('aria-label', 'Venue');
-    tabs.forEach((t, i) => {
-      const button = el('button', { type: 'button', className: 'tab', textContent: t.venue.name });
-      button.setAttribute('role', 'tab');
-      button.setAttribute('aria-selected', String(i === tabIndex));
-      if (t.submission?.status) button.title = `${t.venue.name}: ${t.submission.decision ?? t.submission.status.replace('_', ' ')}`;
-      button.addEventListener('click', () => {
-        tabIndex = i;
-        void show();
-      });
-      list.append(button);
+const VIEWS: { view: Settings['view']; label: string }[] = [
+  { view: 'histogram', label: 'Bar chart' },
+  { view: 'curve', label: 'Distribution' },
+];
+
+/** Bar chart or distribution: one figure at a time, the choice kept as the plugin's `view` setting. */
+function viewSwitch(): HTMLElement {
+  const group = el('div', { className: 'switch' });
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', 'Figure');
+  for (const v of VIEWS) {
+    const button = el('button', { type: 'button', textContent: v.label });
+    button.setAttribute('aria-pressed', String(settings.view === v.view));
+    button.addEventListener('click', () => {
+      if (settings.view === v.view) return;
+      settings = { ...settings, view: v.view };
+      draw();
+      pp.settings.set('view', v.view).catch(() => {});
     });
-    bar.append(list);
+    group.append(button);
   }
+  return group;
+}
+
+/** The venue tabs, when there is more than one venue. */
+function venueTabs(): HTMLElement | null {
+  if (tabs.length <= 1) return null;
+  const bar = el('div', { className: 'controls' });
+  const list = el('div', { className: 'tabs' });
+  list.setAttribute('role', 'tablist');
+  list.setAttribute('aria-label', 'Venue');
+  tabs.forEach((t, i) => {
+    const button = el('button', { type: 'button', className: 'tab', textContent: t.venue.name });
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', String(i === tabIndex));
+    if (t.submission?.status) button.title = `${t.venue.name}: ${t.submission.decision ?? t.submission.status.replace('_', ' ')}`;
+    button.addEventListener('click', () => {
+      tabIndex = i;
+      void show();
+    });
+    list.append(button);
+  });
+  bar.append(list);
+  return bar;
+}
+
+/** The score picker (or the score's name, when there is only one), drawn at the right of the first line. */
+function fieldPicker(tab: VenueTab, summary: PP.ScoreSummary): HTMLElement {
+  const bar = el('div', { className: 'picker' });
+  bar.append(viewSwitch());
   if (tab.fields.length > 1) {
     const select = el('select', { id: 'field' });
     for (const f of tab.fields) select.append(el('option', { value: f.field, textContent: f.label, selected: f.field === summary.field }));
@@ -197,7 +232,16 @@ let summaryId = 0;
 function draw(loading = false) {
   if (!current) return;
   const { tab, summary, field, marks } = current;
-  const parts: Node[] = [controls(tab, summary)];
+  const top = venueTabs();
+  const parts: Node[] = top ? [top] : [];
+  const picker = fieldPicker(tab, summary);
+  // The first line under the tabs, with the picker at its right.
+  const done = () => {
+    const first = top ? 1 : 0;
+    const line = parts[first];
+    parts[first] = line ? el('div', { className: 'head' }, line, picker) : picker;
+    app.replaceChildren(...parts);
+  };
   if (summary.hidden) {
     parts.push(
       el(
@@ -206,19 +250,19 @@ function draw(loading = false) {
         `${count(summary.count)} submissions at ${tab.venue.name} have a ${summary.label.toLowerCase()}. The site shows how they stand once the venue's decisions are out.`,
       ),
     );
-    app.replaceChildren(...parts);
+    done();
     return;
   }
   if (!field || loading) {
     parts.push(el('p', { className: 'note' }, 'Loading…'));
-    app.replaceChildren(...parts);
+    done();
     return;
   }
   const split = splitOn(settings.splitByDecision, field.decisionsOut);
   const mean = tab.submission ? paperMean(tab.submission, field.field) : null;
   const standing = mean ? standingOf(field.values, mean) : null;
   const label = standing ? markerLabel(standing) : null;
-  const width = Math.max(220, Math.floor(app.clientWidth || document.body.clientWidth || 300));
+  const width = Math.min(MAX_FIGURE_WIDTH, Math.max(220, Math.floor(app.clientWidth || document.body.clientWidth || 300)));
   const describedBy = `summary-${++summaryId}`;
   const placed: PlacedMark[] | null = tab.marks && marks ? placeMarks(field.values, marks) : null;
   const options = {
@@ -266,15 +310,23 @@ function draw(loading = false) {
   if (field.values.length === 0) {
     parts.push(el('p', { className: 'note' }, 'No submission has this score yet.'));
   } else {
-    if (settings.view !== 'curve') parts.push(histogram(options));
-    if (settings.view !== 'histogram') parts.push(curve(options));
+    parts.push(settings.view === 'curve' ? curve(options) : histogram(options));
   }
   if (split) {
     const counts = outcomeCounts(field);
     const decided = (field.split.accepted?.count ?? 0) + (field.split.rejected?.count ?? 0);
     const legend = el('ul', { className: 'legend' });
     for (const o of counts) {
-      legend.append(el('li', {}, el('span', { className: `swatch o-${o.outcome}` }), `${OUTCOME_LABELS[o.outcome]} ${count(o.count)}`));
+      const item = el('li', {}, el('span', { className: `swatch o-${o.outcome}` }), `${OUTCOME_LABELS[o.outcome]} ${count(o.count)}`);
+      item.dataset.outcome = o.outcome;
+      item.tabIndex = 0;
+      const on = () => highlight(o.outcome);
+      const off = () => highlight(null);
+      item.addEventListener('mouseenter', on);
+      item.addEventListener('mouseleave', off);
+      item.addEventListener('focus', on);
+      item.addEventListener('blur', off);
+      legend.append(item);
     }
     if (decided) legend.append(el('li', { className: 'muted' }, `${shareText(field.split.accepted?.count ?? 0, decided)} accepted`));
     parts.push(legend);
@@ -282,7 +334,16 @@ function draw(loading = false) {
   const said = summaryText({ field, standing, split });
   const marked = tab.marks && placed ? ` ${marksSummaryText(tab.marks.name, placed, field.values)}` : '';
   parts.push(el('p', { className: 'sr-only', id: describedBy }, said + marked));
-  app.replaceChildren(...parts);
+  done();
+}
+
+/** Fade every outcome but `outcome` in the figures and the legend; `null` shows them all again. */
+function highlight(outcome: Outcome | null) {
+  for (const node of app.querySelectorAll<Element>('svg [class*="o-"], .legend li[data-outcome]')) {
+    const own =
+      node instanceof HTMLElement ? node.dataset.outcome : OUTCOMES.find((o) => node.classList.contains(`o-${o}`));
+    node.classList.toggle('faded', outcome !== null && own !== undefined && own !== outcome);
+  }
 }
 
 async function load(ctx: PP.Context) {

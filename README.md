@@ -5,7 +5,7 @@ among the submissions at its venue, and a venue's whole distribution. The "where
 for review scores.
 
 - **On a paper** (in the Submissions section, under each submission that has scores): the paper's mean over its
-  reviews, marked on that venue's histogram and on a curve, with the share of submissions below it shaded and its
+  reviews, marked on that venue's bar chart or curve, with the share of submissions below it shaded and its
   band ("Top 12%"). A paper that went to several venues (rejected at one, accepted at the next) gets a figure under
   each.
 - **On a venue** (main column): the whole distribution, split by decision once decisions are out, which shows the
@@ -15,10 +15,13 @@ for review scores.
   hover with their mean and band; up and down arrows step from one to the next, and a click or Enter opens the paper.
   A tab per venue. A venue with no page of its own (a track) shows the organisation's own distribution, still marked.
 
-Two figures, because review scores are discrete (ICLR rates on {1, 3, 5, 6, 8, 10}), so means bunch at a few
-values. The **histogram** shows that bunching honestly. The **curve** is a kernel density whose bandwidth is never
+Two figures, switched by the toggle beside the summary line (the same height, so switching doesn't resize the
+frame), because review scores are discrete (ICLR rates on {1, 3, 5, 6, 8, 10}), so means bunch at a few
+values. The **bar chart** shows that bunching honestly. The **curve** is a kernel density whose bandwidth is never
 narrower than 0.8 times the widest gap between the values that hold 90% of the submissions, so it doesn't invent
-modes between them (`src/distribution.ts`, tested on simulated ICLR-sized venues in `test/distribution.test.ts`).
+modes between them (`src/distribution.ts`, tested on simulated ICLR-sized venues in `test/distribution.test.ts`). Both
+span the venue's scale: the form's range, or else the means' extremes rounded out to whole scores, so an axis never
+runs past the scale's ends. Hover a legend item to pick out that outcome.
 Hover, or focus a figure and use the arrow keys, to read it off: a bar's range, count and share; on the curve, how
 many papers are below a score and, split, the accept rate there.
 
@@ -26,11 +29,11 @@ many papers are below a score and, split, the accept rate there.
 
 | Setting           | Values                                    | Default |
 | ----------------- | ----------------------------------------- | ------- |
-| `view`            | `both`, `histogram`, `curve`              | `both`  |
+| `view`            | `histogram` (bar chart), `curve`          | `histogram` |
 | `field`           | a score field's key (`rating`, `soundness`, …); empty is the venue's first, usually the overall rating | `""` |
 | `splitByDecision` | `auto` (once decisions are out), `on`, `off` | `auto` |
 
-The field switcher above the figure sets `field`. In `settings.json` they are
+The toggle and the score picker beside the summary line set `view` and `field`. In `settings.json` they are
 `benedict-armstrong/score-standing.view` and so on.
 
 ## Permissions and data

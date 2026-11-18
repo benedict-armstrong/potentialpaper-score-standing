@@ -55,7 +55,9 @@ describe('the curve', () => {
     expect(m.domain).toEqual([1, 10]);
     expect(Math.max(...m.ys)).toBeCloseTo(1, 10);
     expect(m.layers).toEqual([]);
-    expect(curveModel({ ...f, min: null, max: null }, false).domain[0]).toBeLessThan(2);
+    // Without a form's range, the means' extremes rounded out to whole scores: never past the scale's ends.
+    const unranged = curveModel({ ...f, min: null, max: null }, false).domain;
+    expect(unranged).toEqual([Math.floor(f.values[0]), Math.ceil(f.values[f.values.length - 1])]);
     expect(curveModel(f, false, 12).domain[1]).toBe(12);
   });
 

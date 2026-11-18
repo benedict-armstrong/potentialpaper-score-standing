@@ -15,7 +15,7 @@ export const OUTCOME_LABELS: Record<Outcome, string> = {
   pending: 'No decision',
 };
 
-export type View = 'both' | 'histogram' | 'curve';
+export type View = 'histogram' | 'curve';
 export type Split = 'auto' | 'on' | 'off';
 
 export interface Settings {
@@ -30,7 +30,8 @@ export function readSettings(raw: Record<string, unknown> | null | undefined): S
   const split = raw?.splitByDecision;
   const field = raw?.field;
   return {
-    view: view === 'histogram' || view === 'curve' ? view : 'both',
+    // One figure at a time; `both`, from before the switch, opens on the bar chart.
+    view: view === 'curve' ? 'curve' : 'histogram',
     field: typeof field === 'string' ? field.trim() : '',
     splitByDecision: split === 'on' || split === 'off' ? split : 'auto',
   };

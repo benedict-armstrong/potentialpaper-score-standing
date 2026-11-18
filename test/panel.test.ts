@@ -154,6 +154,11 @@ function fakePp(context: Partial<PP.Context>, answers: {
   return fake;
 }
 
+/** The bar chart / distribution switch's button with this label. */
+function viewButton(label: string): HTMLButtonElement {
+  return [...document.querySelectorAll<HTMLButtonElement>('.switch button')].find((b) => b.textContent === label)!;
+}
+
 async function boot() {
   vi.resetModules();
   await import('../src/main');
@@ -228,13 +233,19 @@ describe('on a paper', () => {
     ]);
     // Mean 6.5 over two reviews: 2, 3, 4, 4.5, 5 and 6 are below it, of 8.
     expect(document.querySelector('.caption')!.textContent).toBe('6.5 mean over 2 reviews, above 6 of 8 · Top 15%');
+    // One figure at a time: the bar chart, and the distribution behind the switch.
     const figures = [...document.querySelectorAll('svg[role=img]')];
     expect(figures.map((f) => f.getAttribute('aria-label'))).toEqual([
       'Histogram of rating means at ICLR 2027; This paper, Top 15%',
-      'Curve of rating means at ICLR 2027; This paper, Top 15%',
     ]);
     const describedBy = figures[0].getAttribute('aria-describedby')!;
     expect(document.getElementById(describedBy)!.textContent).toContain('3 accepted, 5 rejected; 38% of decided submissions accepted.');
+    viewButton('Distribution').click();
+    expect([...document.querySelectorAll('svg[role=img]')].map((f) => f.getAttribute('aria-label'))).toEqual([
+      'Curve of rating means at ICLR 2027; This paper, Top 15%',
+    ]);
+    expect(viewButton('Distribution').getAttribute('aria-pressed')).toBe('true');
+    expect(fake.calls.some((c) => c.method === 'settings.set' && c.args[0] === 'view' && c.args[1] === 'curve')).toBe(true);
     expect(document.querySelectorAll('path.layer.o-accepted').length).toBe(1);
     expect(document.querySelector('.legend')!.textContent).toContain('Accepted 3');
 
@@ -370,7 +381,9 @@ describe('on an organisation', () => {
       ['org:eth', ICLR.id, 'rating', { marks: true }],
     ]);
     expect(document.querySelector('.caption')!.textContent).toBe("2 of ETH Zurich's submissions among 8 at ICLR 2027");
-    const [hist, curve] = [...document.querySelectorAll('svg[role=img]')];
+    const hist = document.querySelector('svg[role=img]')!;
+    viewButton('Distribution').click();
+    const curve = document.querySelector('svg[role=img]')!;
     expect(curve.getAttribute('aria-label')).toBe(
       "Curve of rating means at ICLR 2027; ETH Zurich's 2 submissions marked",
     );
