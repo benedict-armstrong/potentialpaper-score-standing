@@ -1,7 +1,6 @@
 /**
- * The shape of a venue's review scores: kernel densities, quantiles and standings. Pure, no DOM. Ported from
- * acceptodds' `lib/distribution.ts` (the "where you stand" chart), with a bandwidth chosen for scores, which are
- * discrete.
+ * The shape of a venue's review scores: kernel densities, quantiles and standings. Pure, no DOM. Drawn as
+ * acceptodds draws its review distribution (`lib/reviews.ts`): a kernel 6% of the scale wide, scaled to a peak of 1.
  */
 
 /** The `p` quantile of sorted `values`, linearly interpolated. */
@@ -13,62 +12,16 @@ export function quantile(values: readonly number[], p: number): number {
   return values[lo] + (values[hi] - values[lo]) * (i - lo);
 }
 
-/** The share of the mass the "heavy" values hold, whose gaps set the bandwidth's floor. */
-const HEAVY_MASS = 0.9;
-
 /**
- * The widest gap between neighbouring values among those that hold most of the mass. Review scores are discrete
- * (ICLR rates on {1, 3, 5, 6, 8, 10}), so a submission's mean over three or four reviews falls on a few values, most
- * of the mass on a lattice (quarters, thirds) and a little on rarer values between. The distinct values are taken
- * from the most common down until they hold `HEAVY_MASS` of the submissions; the result is the widest gap between
- * two of them that are neighbours. `values` sorted ascending.
+ * The kernel's width, as a share of the scale, as acceptodds draws it. A mean of three whole-number scores falls on
+ * thirds, so anything narrow draws a comb; at this width neighbouring thirds of a 1–4 scale (a ninth of it apart)
+ * blend into one shape. The curve is only the shape: the marker and every share read off it come from the real means.
  */
-export function latticeGap(values: readonly number[]): number {
-  const counts = new Map<number, number>();
-  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
-  if (counts.size < 2) return 0;
-  const byCount = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]);
-  const heavy: number[] = [];
-  let mass = 0;
-  for (const [value, count] of byCount) {
-    heavy.push(value);
-    mass += count;
-    if (mass >= HEAVY_MASS * values.length && heavy.length >= 2) break;
-  }
-  heavy.sort((a, b) => a - b);
-  let gap = 0;
-  for (let i = 1; i < heavy.length; i += 1) gap = Math.max(gap, heavy[i] - heavy[i - 1]);
-  return gap;
-}
+export const BANDWIDTH_OF_SCALE = 0.06;
 
-/**
- * Two equal Gaussians `d` apart sum to one bump while `h ≥ d/2`, and to two with a dip between once they are further
- * apart. Neighbours are rarely equal: means over 3–5 ICLR-style reviews put a light value between two heavy ones, and
- * at `h = 0.6·d` a spurious second mode still showed in some simulated ICLR-sized venues (`test/distribution.test.ts`).
- * At `0.8·d` none did, from a thousand submissions up.
- */
-const LATTICE_FACTOR = 0.8;
-
-/** The narrowest a kernel may be, as a share of the values' range: a flat field still draws a visible bump. */
-const MIN_BANDWIDTH_OF_RANGE = 1 / 40;
-
-/**
- * The kernel's width for sorted `values`: Silverman's rule of thumb, `0.9 · min(σ, IQR/1.34) · n^(−1/5)`, but never
- * narrower than `LATTICE_FACTOR` times the widest gap between the values that hold most of the mass
- * (`latticeGap`). Narrower, the curve would show a mode at every value the means bunch at and invent dips between
- * them; the histogram shows that bunching honestly instead. Also floored at a share of the range, and above zero
- * for a field of identical values.
- */
-export function bandwidth(values: readonly number[]): number {
-  const n = values.length;
-  if (n === 0) return 1;
-  const mean = values.reduce((a, v) => a + v, 0) / n;
-  const sd = Math.sqrt(values.reduce((a, v) => a + (v - mean) ** 2, 0) / Math.max(1, n - 1));
-  const iqr = quantile(values, 0.75) - quantile(values, 0.25);
-  const spread = iqr > 0 ? Math.min(sd, iqr / 1.34) : sd;
-  const silverman = 0.9 * spread * n ** -0.2;
-  const range = values[n - 1] - values[0];
-  return Math.max(silverman, LATTICE_FACTOR * latticeGap(values), range * MIN_BANDWIDTH_OF_RANGE, 1e-3);
+/** The kernel's width on a scale from `lo` to `hi`. */
+export function scaleBandwidth(lo: number, hi: number): number {
+  return hi > lo ? (hi - lo) * BANDWIDTH_OF_SCALE : 1;
 }
 
 export interface Density {
@@ -93,14 +46,14 @@ function weighted(values: readonly number[]): [number, number][] {
 
 /**
  * A Gaussian kernel density of sorted `values` at `points` evenly spaced x's over `domain` (by default three
- * bandwidths past the extremes, where the curve has all but reached zero). `h` defaults to `bandwidth(values)`;
- * pass the whole field's so that subsets (one outcome) are drawn with the same kernel and add up to it.
+ * bandwidths past the extremes, where the curve has all but reached zero), with kernel width `h`. Pass the whole
+ * field's `h` so that subsets (one outcome) are drawn with the same kernel and add up to it.
  */
 export function density(
   values: readonly number[],
-  options: { points?: number; domain?: [number, number]; h?: number } = {},
+  options: { h: number; points?: number; domain?: [number, number] },
 ): Density {
-  const h = options.h ?? bandwidth(values);
+  const h = options.h;
   const points = options.points ?? 160;
   const domain: [number, number] = options.domain ?? [
     (values[0] ?? 0) - 3 * h,
@@ -121,12 +74,9 @@ export function density(
   return { xs, ys, domain, bandwidth: h };
 }
 
-/**
- * Densities for drawing: scaled so the highest is 1, then square-rooted (a rootogram's scale), so the tails of a
- * peaked field still read beside its crowd. Still monotonic: a taller curve is still more papers.
- */
-export function rootScaled(ys: readonly number[], peak = Math.max(...ys)): number[] {
-  return ys.map((y) => (peak > 0 ? Math.sqrt(Math.max(0, y) / peak) : 0));
+/** Densities for drawing: scaled linearly so the highest is 1, as acceptodds draws them. */
+export function peakScaled(ys: readonly number[], peak = Math.max(...ys)): number[] {
+  return ys.map((y) => (peak > 0 ? Math.max(0, y) / peak : 0));
 }
 
 /** How many of sorted `values` are strictly below `x`, by binary search. */

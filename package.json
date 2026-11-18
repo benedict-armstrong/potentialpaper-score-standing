@@ -1,6 +1,6 @@
 {
   "name": "potentialpaper-score-standing",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "A PotentialPaper plugin: where a paper's review scores stand at its venue, as a histogram and a curve.",
   "license": "MIT",

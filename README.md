@@ -16,12 +16,11 @@ for review scores.
   A tab per venue. A venue with no page of its own (a track) shows the organisation's own distribution, still marked.
 
 Two figures, switched by the toggle beside the summary line (the same height, so switching doesn't resize the
-frame), because review scores are discrete (ICLR rates on {1, 3, 5, 6, 8, 10}), so means bunch at a few
-values. The **bar chart** shows that bunching honestly. The **curve** is a kernel density whose bandwidth is never
-narrower than 0.8 times the widest gap between the values that hold 90% of the submissions, so it doesn't invent
-modes between them (`src/distribution.ts`, tested on simulated ICLR-sized venues in `test/distribution.test.ts`). Both
-span the venue's scale: the form's range, or else the means' extremes rounded out to whole scores, so an axis never
-runs past the scale's ends. Hover a legend item to pick out that outcome.
+frame). Review scores are discrete (ICLR rates on {1, 3, 5, 6, 8, 10}), so means bunch at a few values: the
+**bar chart** shows that bunching honestly. The **curve** is drawn as acceptodds draws it: a kernel density whose
+kernel is 6% of the scale wide (so neighbouring thirds blend into one shape), scaled to peak at 1
+(`src/distribution.ts`). Both span the venue's scale: the form's range, or else the means' extremes rounded out to
+whole scores, so an axis never runs past the scale's ends. Hover a legend item to pick out that outcome.
 Hover, or focus a figure and use the arrow keys, to read it off: a bar's range, count and share; on the curve, how
 many papers are below a score and, split, the accept rate there.
 

@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
-  bandwidth,
   countBelow,
   density,
-  latticeGap,
   modes,
   niceTicks,
+  peakScaled,
   percentAhead,
   quantile,
-  rootScaled,
+  scaleBandwidth,
   standingBand,
   yAt,
 } from '../src/distribution';
@@ -46,56 +45,31 @@ function venue(n: number, ks: number[], seed: number): number[] {
   return out.sort((a, b) => a - b);
 }
 
-/** Silverman's rule alone, what acceptodds drew with. */
-function silverman(values: number[]): number {
-  const n = values.length;
-  const mean = values.reduce((a, v) => a + v, 0) / n;
-  const sd = Math.sqrt(values.reduce((a, v) => a + (v - mean) ** 2, 0) / (n - 1));
-  const iqr = quantile(values, 0.75) - quantile(values, 0.25);
-  return 0.9 * Math.min(sd, iqr / 1.34) * n ** -0.2;
-}
+describe('the kernel, as acceptodds draws it', () => {
+  it('is 6% of the scale wide', () => {
+    expect(scaleBandwidth(1, 4)).toBeCloseTo(0.18, 10);
+    expect(scaleBandwidth(1, 10)).toBeCloseTo(0.54, 10);
+    expect(scaleBandwidth(5, 5)).toBe(1);
+  });
 
-describe('the bandwidth for discrete scores', () => {
-  it('draws one bump for a venue whose quality is unimodal, where Silverman alone invents modes between the lattice', () => {
-    for (const ks of [[1], [3], [4], [3, 4, 5]]) {
-      for (const n of [1000, 10_000]) {
-        for (let seed = 1; seed <= 10; seed += 1) {
-          const values = venue(n, ks, seed * 7919);
-          expect(modes(density(values).ys), `n=${n} reviews=${ks} seed=${seed}`).toBe(1);
-        }
-      }
+  it('draws one bump for a simulated ICLR-sized venue, whose means bunch on a lattice', () => {
+    for (let seed = 1; seed <= 10; seed += 1) {
+      const values = venue(10_000, [3, 4, 5], seed * 7919);
+      expect(modes(density(values, { h: scaleBandwidth(1, 10), domain: [1, 10] }).ys), `seed=${seed}`).toBe(1);
     }
-    // The case the floor is for: one review each, so every mean is a scale value.
-    const single = venue(2000, [1], 1);
-    expect(modes(density(single, { h: silverman(single) }).ys)).toBeGreaterThan(1);
-    expect(modes(density(single).ys)).toBe(1);
   });
 
   it('keeps a real second mode', () => {
     const r = rng(3);
     const values = Array.from({ length: 4000 }, (_, i) => (i % 2 ? 3 : 7.5) + 0.5 * normal(r)).sort((a, b) => a - b);
-    expect(modes(density(values).ys)).toBe(2);
-  });
-
-  it('measures the gap between the values that hold the mass, not the rare ones between', () => {
-    // 90% of the mass at whole numbers, a few at halves: the lattice is 1.
-    const values = [...Array(30).fill(4), ...Array(30).fill(5), ...Array(30).fill(6), 4.5, 5.5, 5.5].sort();
-    expect(latticeGap(values)).toBe(1);
-    expect(latticeGap([5, 5, 5])).toBe(0);
-    expect(bandwidth(values)).toBeGreaterThanOrEqual(0.8);
-  });
-
-  it('is positive for a field of one value, or none', () => {
-    expect(bandwidth([6, 6, 6])).toBeGreaterThan(0);
-    expect(bandwidth([])).toBe(1);
-    expect(modes(density([6, 6, 6]).ys)).toBe(1);
+    expect(modes(density(values, { h: scaleBandwidth(1, 10) }).ys)).toBe(2);
   });
 });
 
 describe('the density', () => {
   it('integrates to about one, and adds up across subsets drawn with the same kernel', () => {
     const values = venue(2000, [4], 11);
-    const d = density(values);
+    const d = density(values, { h: scaleBandwidth(1, 10) });
     const step = d.xs[1] - d.xs[0];
     expect(d.ys.reduce((a, y) => a + y * step, 0)).toBeCloseTo(1, 2);
 
@@ -109,10 +83,9 @@ describe('the density', () => {
     });
   });
 
-  it('root-scales to a peak of one, keeping the order', () => {
-    const scaled = rootScaled([0, 1, 4, 2]);
-    expect(scaled).toEqual([0, 0.5, 1, Math.sqrt(0.5)]);
-    expect(rootScaled([0, 0])).toEqual([0, 0]);
+  it('scales linearly to a peak of one', () => {
+    expect(peakScaled([0, 1, 4, 2])).toEqual([0, 0.25, 1, 0.5]);
+    expect(peakScaled([0, 0])).toEqual([0, 0]);
   });
 
   it('reads the curve between its samples', () => {

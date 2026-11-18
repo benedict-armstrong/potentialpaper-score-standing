@@ -3,7 +3,7 @@
  * The two figures as numbers, before any drawing: the histogram's stacked bars and the curve's layers. Pure, so the
  * tests can check what is drawn without a DOM.
  */
-import { bandwidth, countBelow, density, rootScaled } from './distribution';
+import { countBelow, density, peakScaled, scaleBandwidth } from './distribution';
 import { binIndex, OUTCOMES, type Outcome } from './standing';
 
 export interface Layer {
@@ -51,7 +51,7 @@ export function histogramModel(field: Pick<PP.ScoreField, 'bins' | 'split'>, spl
 
 export interface CurveModel {
   xs: number[];
-  /** Root-scaled to peak at 1: the curve's height at each x. */
+  /** Scaled to peak at 1: the curve's height at each x. */
   ys: number[];
   domain: [number, number];
   bandwidth: number;
@@ -65,7 +65,8 @@ export interface CurveModel {
 }
 
 /**
- * The curve: a kernel density of the means (one kernel for the whole field, `bandwidth`), root-scaled. Its domain is
+ * The curve: a kernel density of the means, one kernel for the whole field 6% of the scale wide, scaled to peak at 1,
+ * as acceptodds draws it. Its domain is
  * the venue's scale, as acceptodds draws it: the form's range when the form gives one (no score falls outside it),
  * else the means' extremes rounded out to whole scores (a scale's ends are whole, so this never runs past them, as
  * 0.5 on a 1–4 scale would). It always takes in `include` (the paper's mean). The curve stops at the ends.
@@ -77,13 +78,14 @@ export function curveModel(
   points = 160,
 ): CurveModel {
   const values = field.values;
-  const h = bandwidth(values);
   let lo = field.min ?? Math.floor(values[0] ?? 0);
   let hi = field.max ?? Math.ceil(values[values.length - 1] ?? 0);
   if (values.length) {
     lo = Math.min(lo, values[0]);
     hi = Math.max(hi, values[values.length - 1]);
   }
+  // The kernel's width follows the scale, not the paper's mean, so every paper's figure has the same shape.
+  const h = scaleBandwidth(lo, hi);
   if (include !== null) {
     lo = Math.min(lo, include);
     hi = Math.max(hi, include);
@@ -94,7 +96,7 @@ export function curveModel(
   }
   const domain: [number, number] = [lo, hi];
   const total = density(values, { h, domain, points });
-  const ys = rootScaled(total.ys);
+  const ys = peakScaled(total.ys);
   const layers: Layer[] = [];
   const shares: CurveModel['shares'] = {};
   if (split && values.length) {
